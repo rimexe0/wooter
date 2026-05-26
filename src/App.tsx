@@ -2,6 +2,8 @@ import {
   Activity,
   Cpu,
   Download,
+  FileDown,
+  FileUp,
   Link2,
   PlugZap,
   Power,
@@ -144,6 +146,7 @@ const KEY_OPTIONS = [
 
 const SETTING_IDS = Object.keys(DEFAULT_SETTINGS) as Array<keyof Settings>;
 const STORAGE_KEY = "wooter-settings:v1";
+const CONFIG_VERSION = 1;
 
 const initialLatest: LatestState = {
   k1raw: null,
@@ -172,6 +175,7 @@ function App() {
   const keepReadingRef = useRef(false);
   const bufferRef = useRef("");
   const settingsRef = useRef(settings);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const encoder = useMemo(() => new TextEncoder(), []);
 
@@ -403,6 +407,48 @@ function App() {
     }
   }, [applyAll, log]);
 
+  const exportConfig = useCallback(() => {
+    const payload = {
+      version: CONFIG_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings: settingsRef.current,
+    };
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    anchor.href = url;
+    anchor.download = `wooter-config-${stamp}.json`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    log("Exported config JSON.");
+  }, [log]);
+
+  const importConfig = useCallback(
+    async (file: File | null) => {
+      if (!file) return;
+
+      try {
+        const parsed = JSON.parse(await file.text()) as unknown;
+        const imported = extractSettings(parsed);
+        const next = { ...settingsRef.current, ...imported };
+        settingsRef.current = next;
+        setSettings(next);
+        log(`Imported ${Object.keys(imported).length} config values from ${file.name}.`);
+        await applyAll();
+      } catch (error) {
+        log(`Import failed: ${errorMessage(error)}`);
+      } finally {
+        if (importInputRef.current) importInputRef.current.value = "";
+      }
+    },
+    [applyAll, log],
+  );
+
   const bothReady = latest.k1ready && latest.k2ready;
   const fileOrigin = location.protocol === "file:";
   const insecureOrigin = !fileOrigin && !window.isSecureContext;
@@ -510,6 +556,21 @@ function App() {
                   <Download />
                   Load Settings
                 </Button>
+                <Button variant="outline" onClick={exportConfig}>
+                  <FileDown />
+                  Export Config
+                </Button>
+                <Button variant="outline" onClick={() => importInputRef.current?.click()}>
+                  <FileUp />
+                  Import Config
+                </Button>
+                <input
+                  ref={importInputRef}
+                  className="hidden"
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={(event) => void importConfig(event.currentTarget.files?.[0] ?? null)}
+                />
                 <Button variant="ghost" onClick={() => setLogLines([])}>
                   <Trash2 />
                   Clear Log
@@ -648,7 +709,7 @@ function LiveKey({
         <Metric label="Position" value={position == null ? "--" : position.toFixed(3)} />
       </div>
       <div className="mt-3 h-3 overflow-hidden rounded-full border bg-background">
-        <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -853,6 +914,36 @@ function StatusBadge({
 
 function isNumericSetting(id: keyof Settings) {
   return id !== "k1_key" && id !== "k2_key";
+}
+
+function extractSettings(value: unknown): Partial<Settings> {
+  const source =
+    isRecord(value) && isRecord(value.settings) ? value.settings : isRecord(value) ? value : null;
+  if (!source) throw new Error("Config must be a JSON object.");
+
+  const imported: Partial<Settings> = {};
+  for (const id of SETTING_IDS) {
+    const raw = source[id];
+    if (raw == null) continue;
+    const next = String(raw).trim();
+    if (!next) continue;
+    if (isNumericSetting(id) && !Number.isFinite(Number(next))) {
+      throw new Error(`Invalid numeric value for ${id}.`);
+    }
+    if ((id === "k1_key" || id === "k2_key") && !KEY_OPTIONS.includes(next.toUpperCase())) {
+      throw new Error(`Invalid key output for ${id}.`);
+    }
+    imported[id] = id === "k1_key" || id === "k2_key" ? next.toUpperCase() : next;
+  }
+
+  if (Object.keys(imported).length === 0) {
+    throw new Error("Config did not contain any known settings.");
+  }
+  return imported;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorMessage(error: unknown) {
