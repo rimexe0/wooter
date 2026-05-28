@@ -1,6 +1,7 @@
 {
   "name": "wooter-hall-configurator",
   "version": "0.1.0",
+  "description": "Web Serial configurator for a two-key RP2040 Hall effect keypad.",
   "private": true,
   "type": "module",
   "scripts": {
