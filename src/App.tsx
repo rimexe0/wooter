@@ -5,6 +5,7 @@ import {
   FileDown,
   FileUp,
   Link2,
+  Lightbulb,
   PlugZap,
   Power,
   PowerOff,
@@ -67,16 +68,25 @@ type Settings = {
   filter_samples: string;
   trigger_deadband: string;
   trigger_confirm: string;
+  led_enabled: string;
+  led_brightness: string;
+  led_disarmed: string;
   k1_min: string;
   k1_max: string;
   k1_act: string;
   k1_rt: string;
   k1_key: string;
+  k1_led_r: string;
+  k1_led_g: string;
+  k1_led_b: string;
   k2_min: string;
   k2_max: string;
   k2_act: string;
   k2_rt: string;
   k2_key: string;
+  k2_led_r: string;
+  k2_led_g: string;
+  k2_led_b: string;
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -84,16 +94,25 @@ const DEFAULT_SETTINGS: Settings = {
   filter_samples: "10",
   trigger_deadband: "0.025",
   trigger_confirm: "4",
+  led_enabled: "1",
+  led_brightness: "0.28",
+  led_disarmed: "1",
   k1_min: "17000",
   k1_max: "31000",
   k1_act: "0.45",
   k1_rt: "0.10",
   k1_key: "Z",
+  k1_led_r: "0",
+  k1_led_g: "1",
+  k1_led_b: "0",
   k2_min: "17000",
   k2_max: "31000",
   k2_act: "0.45",
   k2_rt: "0.10",
   k2_key: "X",
+  k2_led_r: "0",
+  k2_led_g: "0",
+  k2_led_b: "1",
 };
 
 const KEY_OPTIONS = [
@@ -188,6 +207,19 @@ function App() {
     (line: string) => {
       if (!line) return;
       setLastLine(line.length > 38 ? `${line.slice(0, 38)}...` : line);
+
+      if (line.startsWith("CONFIG ")) {
+        try {
+          const imported = extractSettings(JSON.parse(line.slice(7)));
+          const next = { ...settingsRef.current, ...imported };
+          settingsRef.current = next;
+          setSettings(next);
+          log(`Loaded ${Object.keys(imported).length} settings from keypad.`);
+        } catch (error) {
+          log(`Keypad config failed: ${errorMessage(error)}`);
+        }
+        return;
+      }
 
       if (!line.startsWith("DATA ")) {
         log(`< ${line}`);
@@ -349,14 +381,14 @@ function App() {
       writerRef.current = port.writable.getWriter();
       setConnected(true);
       log("Connected.");
-      await sendCommand("ARM 0");
-      await applyAll();
       void readLoop();
+      await sendCommand("ARM 0");
+      await sendCommand("CONFIG");
     } catch (error) {
       log(`Connect failed: ${errorMessage(error)}`);
       await disconnect();
     }
-  }, [applyAll, disconnect, log, readLoop, sendCommand]);
+  }, [disconnect, log, readLoop, sendCommand]);
 
   const setSetting = useCallback(
     (id: keyof Settings, value: string, send = true) => {
@@ -406,6 +438,15 @@ function App() {
       log(`Load failed: ${errorMessage(error)}`);
     }
   }, [applyAll, log]);
+
+  const saveToKeypad = useCallback(async () => {
+    await applyAll();
+    await sendCommand("SAVE");
+  }, [applyAll, sendCommand]);
+
+  const loadFromKeypad = useCallback(async () => {
+    await sendCommand("CONFIG");
+  }, [sendCommand]);
 
   const exportConfig = useCallback(() => {
     const payload = {
@@ -548,6 +589,14 @@ function App() {
                   <Upload />
                   Apply All Settings
                 </Button>
+                <Button variant="outline" onClick={() => void saveToKeypad()} disabled={!connected}>
+                  <Save />
+                  Save to Keypad
+                </Button>
+                <Button variant="outline" onClick={() => void loadFromKeypad()} disabled={!connected}>
+                  <Download />
+                  Load from Keypad
+                </Button>
                 <Button variant="outline" onClick={saveLocal}>
                   <Save />
                   Save Settings
@@ -675,6 +724,71 @@ function App() {
             }}
           />
         </section>
+
+        <Card>
+          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Lightbulb className="size-5" />
+                RGB LED
+              </CardTitle>
+              <CardDescription>
+                Disarmed is red. When armed, each key blends its configured color by press depth.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">requires the RGB jumper bridged</Badge>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <SliderSetting
+                id="led_enabled"
+                label="LED enabled"
+                min={0}
+                max={1}
+                step={1}
+                value={settings.led_enabled}
+                onChange={setSetting}
+              />
+              <SliderSetting
+                id="led_brightness"
+                label="Max brightness"
+                min={0}
+                max={1}
+                step={0.01}
+                value={settings.led_brightness}
+                onChange={setSetting}
+              />
+              <SliderSetting
+                id="led_disarmed"
+                label="Disarmed red"
+                min={0}
+                max={1}
+                step={0.01}
+                value={settings.led_disarmed}
+                onChange={setSetting}
+              />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <LedColorSettings
+                title="Key 1 color"
+                redId="k1_led_r"
+                greenId="k1_led_g"
+                blueId="k1_led_b"
+                settings={settings}
+                setSetting={setSetting}
+              />
+              <LedColorSettings
+                title="Key 2 color"
+                redId="k2_led_r"
+                greenId="k2_led_g"
+                blueId="k2_led_b"
+                settings={settings}
+                setSetting={setSetting}
+              />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </main>
   );
@@ -844,6 +958,67 @@ function NumberWithCapture({
         <Button variant="outline" type="button" onClick={() => captureRaw(id)}>
           Use Raw
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function LedColorSettings({
+  title,
+  redId,
+  greenId,
+  blueId,
+  settings,
+  setSetting,
+}: {
+  title: string;
+  redId: keyof Settings;
+  greenId: keyof Settings;
+  blueId: keyof Settings;
+  settings: Settings;
+  setSetting: (id: keyof Settings, value: string, send?: boolean) => void;
+}) {
+  const red = Math.round(Number(settings[redId]) * 255);
+  const green = Math.round(Number(settings[greenId]) * 255);
+  const blue = Math.round(Number(settings[blueId]) * 255);
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="font-medium">{title}</h3>
+        <div
+          className="size-8 rounded-md border"
+          style={{ backgroundColor: `rgb(${red}, ${green}, ${blue})` }}
+        />
+      </div>
+      <div className="grid gap-3">
+        <SliderSetting
+          id={redId}
+          label="Red"
+          min={0}
+          max={1}
+          step={0.01}
+          value={settings[redId]}
+          onChange={setSetting}
+        />
+        <SliderSetting
+          id={greenId}
+          label="Green"
+          min={0}
+          max={1}
+          step={0.01}
+          value={settings[greenId]}
+          onChange={setSetting}
+        />
+        <SliderSetting
+          id={blueId}
+          label="Blue"
+          min={0}
+          max={1}
+          step={0.01}
+          value={settings[blueId]}
+          onChange={setSetting}
+        />
       </div>
     </div>
   );

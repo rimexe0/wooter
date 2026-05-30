@@ -72,6 +72,14 @@ works for local development, and HTTPS works when hosted.
 3. Make sure the `adafruit_hid` library is present in `CIRCUITPY/lib`.
 4. Open the configurator, connect to the serial port, calibrate, then arm.
 
+## Standalone use
+
+After calibration, click `Save to Keypad` in the configurator. The keypad stores
+the current config in CircuitPython NVM and loads it on boot.
+
+The board's `USR` / `BUTTON` input toggles armed and disarmed, so normal use does
+not require opening the web UI. Reset/BOOT hardware buttons are left alone.
+
 ## Useful tuning notes
 
 If the raw values jump too much, start with:
